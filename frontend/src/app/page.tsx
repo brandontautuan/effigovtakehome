@@ -3,18 +3,29 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import { Case, fetchCases, formatDate, statusClass } from "@/lib/cases";
+import {
+  Call,
+  Case,
+  callWebSocketUrl,
+  fetchCalls,
+  fetchCases,
+  formatDate,
+  statusClass,
+} from "@/lib/cases";
 
 const REFRESH_INTERVAL_MS = 3_000;
 
 export default function DashboardPage() {
   const [cases, setCases] = useState<Case[]>([]);
+  const [calls, setCalls] = useState<Call[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const loadCases = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     try {
-      setCases(await fetchCases());
+      const [loadedCases, loadedCalls] = await Promise.all([fetchCases(), fetchCalls()]);
+      setCases(loadedCases);
+      setCalls(loadedCalls);
       setError(null);
     } catch {
       setError("Unable to load cases. Check that the FastAPI server is running.");
@@ -24,13 +35,36 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const initialFetch = window.setTimeout(() => void loadCases(), 0);
-    const interval = window.setInterval(() => void loadCases(), REFRESH_INTERVAL_MS);
+    // Polling preserves a usable dashboard if the optional WebSocket is down.
+    const initialFetch = window.setTimeout(() => void loadDashboard(), 0);
+    const interval = window.setInterval(() => void loadDashboard(), REFRESH_INTERVAL_MS);
     return () => {
       window.clearTimeout(initialFetch);
       window.clearInterval(interval);
     };
-  }, [loadCases]);
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    let socket: WebSocket | undefined;
+    let reconnectTimer: number | undefined;
+    let isDisposed = false;
+
+    function connect() {
+      // A notification contains no case data; reload from FastAPI for consistency.
+      socket = new WebSocket(callWebSocketUrl());
+      socket.onmessage = () => void loadDashboard();
+      socket.onclose = () => {
+        if (!isDisposed) reconnectTimer = window.setTimeout(connect, REFRESH_INTERVAL_MS);
+      };
+    }
+
+    connect();
+    return () => {
+      isDisposed = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, [loadDashboard]);
 
   return (
     <main className="page-shell">
@@ -45,11 +79,32 @@ export default function DashboardPage() {
 
       {isLoading ? <p className="state-message">Loading cases…</p> : null}
       {error ? <p className="state-message error-message">{error}</p> : null}
-      {!isLoading && !error && cases.length === 0 ? (
-        <p className="state-message">No cases have been reported yet.</p>
-      ) : null}
-
-      {!isLoading && !error && cases.length > 0 ? (
+      {!isLoading && !error ? (
+        <>
+          <section className="live-calls" aria-labelledby="live-calls-heading">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Voice operations</p>
+                <h2 id="live-calls-heading">Live Calls</h2>
+              </div>
+              <span className="subtle">WebSocket updates + polling fallback</span>
+            </div>
+            {calls.length === 0 ? <p className="empty-activity">No calls yet.</p> : (
+              <div className="call-grid">
+                {calls.slice(0, 6).map((call) => (
+                  <Link className="call-card" href={`/calls/${call.id}`} key={call.id}>
+                    <span className={call.status === "active" ? "active-dot" : "completed-dot"} />
+                    <div>
+                      <strong>{call.caller_name ?? "Resident"}</strong>
+                      <p>{call.issue_type?.replaceAll("_", " ") ?? "Issue being collected"}</p>
+                      <small>{call.status} · {call.case_number ?? "Case pending"}</small>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        {cases.length === 0 ? <p className="state-message">No cases have been reported yet.</p> : (
         <section className="table-card" aria-label="Cases">
           <table>
             <thead>
@@ -68,6 +123,8 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </section>
+        )}
+        </>
       ) : null}
     </main>
   );

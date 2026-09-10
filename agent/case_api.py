@@ -1,3 +1,5 @@
+"""Async HTTP adapter between the LiveKit agent and the FastAPI case service."""
+
 import logging
 import os
 from typing import Any
@@ -13,7 +15,11 @@ class CaseApiError(Exception):
 
 
 class CaseApiClient:
-    """Small HTTP client for the existing FastAPI case endpoints."""
+    """Small HTTP client for the existing FastAPI case endpoints.
+
+    Centralizing requests keeps backend URLs, timeouts, and safe user-facing
+    failure messages out of the agent's conversational logic.
+    """
 
     def __init__(self, base_url: str | None = None) -> None:
         self.base_url = (base_url or os.getenv("BACKEND_URL", "http://127.0.0.1:8000")).rstrip(
@@ -35,6 +41,21 @@ class CaseApiClient:
             },
         )
 
+    async def create_call(self) -> dict[str, Any]:
+        return await self._request("POST", "/calls", json={})
+
+    async def add_transcript(
+        self, call_id: int, role: str, content: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/calls/{call_id}/transcript",
+            json={"role": role, "content": content},
+        )
+
+    async def update_call(self, call_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("PATCH", f"/calls/{call_id}", json=updates)
+
     async def lookup_case(
         self, case_number: str | None = None, phone: str | None = None
     ) -> list[dict[str, Any]]:
@@ -48,6 +69,18 @@ class CaseApiClient:
             raise CaseApiError("The case service returned an unexpected lookup response.")
         return response
 
+    async def lookup_service_schedule(self, city: str) -> dict[str, Any] | None:
+        try:
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
+                response = await client.get("/service-info/schedule", params={"city": city})
+                if response.status_code == 404:
+                    return response.json()
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as error:
+            logger.warning("Service schedule request failed for city %s: %s", city, error)
+            raise CaseApiError("The service information is unavailable right now.") from error
+
     async def update_case(self, case_id: int, updates: dict[str, str]) -> dict[str, Any]:
         return await self._request(
             "PATCH",
@@ -56,6 +89,7 @@ class CaseApiClient:
         )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        """Make one bounded request without exposing backend details to residents."""
         try:
             async with httpx.AsyncClient(base_url=self.base_url, timeout=10.0) as client:
                 response = await client.request(method, path, **kwargs)

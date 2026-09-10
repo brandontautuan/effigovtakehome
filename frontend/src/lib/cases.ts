@@ -1,3 +1,6 @@
+// This is the dashboard's sole boundary to FastAPI; UI components never read
+// SQLite or depend on the LiveKit SDK directly.
+
 export type Case = {
   id: number;
   case_number: string;
@@ -19,6 +22,26 @@ export type CaseEvent = {
   source: string;
   old_value: string | null;
   new_value: string | null;
+  created_at: string;
+};
+
+export type Call = {
+  id: number;
+  case_id: number | null;
+  case_number: string | null;
+  status: string;
+  caller_name: string | null;
+  phone: string | null;
+  issue_type: string | null;
+  started_at: string;
+  ended_at: string | null;
+};
+
+export type TranscriptMessage = {
+  id: number;
+  call_id: number;
+  role: "resident" | "agent";
+  content: string;
   created_at: string;
 };
 
@@ -50,6 +73,23 @@ export function updateCaseStatus(id: number, status: string): Promise<Case> {
 
 export function fetchCaseEvents(id: string): Promise<CaseEvent[]> {
   return request<CaseEvent[]>(`/cases/${id}/events`, { cache: "no-store" });
+}
+
+export function fetchCalls(): Promise<Call[]> {
+  return request<Call[]>("/calls", { cache: "no-store" });
+}
+
+export function fetchCall(id: string): Promise<Call> {
+  return request<Call>(`/calls/${id}`, { cache: "no-store" });
+}
+
+export function fetchTranscript(id: string): Promise<TranscriptMessage[]> {
+  return request<TranscriptMessage[]>(`/calls/${id}/transcript`, { cache: "no-store" });
+}
+
+export function callWebSocketUrl(): string {
+  // Notifications are refresh hints only. The REST API remains the data source.
+  return `${API_URL.replace(/^http/, "ws")}/ws/calls`;
 }
 
 export function formatDate(value: string): string {

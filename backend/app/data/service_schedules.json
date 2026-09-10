@@ -1,0 +1,27 @@
+{
+  "sacramento": {
+    "city": "Sacramento",
+    "trash": { "day": "Tuesday", "time": "8:00 AM" },
+    "recycling": { "day": "Tuesday", "time": "8:00 AM" }
+  },
+  "folsom": {
+    "city": "Folsom",
+    "trash": { "day": "Monday", "time": "10:00 AM" },
+    "recycling": { "day": "Monday", "time": "10:00 AM" }
+  },
+  "el dorado": {
+    "city": "El Dorado",
+    "trash": { "day": "Wednesday", "time": "9:00 AM" },
+    "recycling": { "day": "Wednesday", "time": "9:00 AM" }
+  },
+  "rancho cordova": {
+    "city": "Rancho Cordova",
+    "trash": { "day": "Thursday", "time": "8:00 AM" },
+    "recycling": { "day": "Thursday", "time": "8:00 AM" }
+  },
+  "elk grove": {
+    "city": "Elk Grove",
+    "trash": { "day": "Friday", "time": "9:00 AM" },
+    "recycling": { "day": "Friday", "time": "9:00 AM" }
+  }
+}

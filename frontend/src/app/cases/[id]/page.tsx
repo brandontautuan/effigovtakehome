@@ -26,6 +26,8 @@ export default function CaseDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   const loadCase = useCallback(async () => {
+    // Load the case and its server-generated audit trail together so staff can
+    // understand both the current state and how it changed.
     try {
       const [loadedCase, loadedEvents] = await Promise.all([
         fetchCase(params.id),

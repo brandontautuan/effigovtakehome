@@ -134,3 +134,13 @@ Open http://127.0.0.1:3000. The case list and detail view poll FastAPI every thr
 Each new case receives a `CaseEvent` in SQLite. Later changes to status, notes, or description receive one event per field that actually changed. Events record a concise description, timestamp, source (`voice_agent`, `staff_dashboard`, or `api`), and old/new values when applicable.
 
 The case detail page requests `GET /cases/{id}/events` every three seconds alongside the case itself. The voice agent sends `voice_agent` as source metadata and the dashboard sends `staff_dashboard` when it changes a status.
+
+## Live calls and transcript
+
+Starting a LiveKit session creates an active `Call` through `POST /calls`. The agent forwards finalized resident transcription from LiveKit's `user_input_transcribed` event and committed agent replies from `conversation_item_added` to `POST /calls/{id}/transcript`. When `create_case` succeeds, the agent links the call to its returned case ID and known name, phone, and issue type through `PATCH /calls/{id}`. The shutdown callback marks the call completed and preserves its transcript.
+
+The staff dashboard loads calls and transcripts through the REST API, using SQLite as the source of truth. It also opens `ws://127.0.0.1:8000/ws/calls`; FastAPI broadcasts small notifications after call, transcript, and case changes, and the dashboard refetches after each notification. Existing three-second polling remains as a reconnect/failure fallback.
+
+## Demo service schedules
+
+The voice agent can look up mock trash and recycling schedules through `GET /service-info/schedule?city=folsom`. The backend reads the data from `backend/app/data/service_schedules.json`; this is intentionally demo data, not real municipal service information. City matching ignores casing and extra spacing. Unsupported cities return a clear `404` response rather than a guessed schedule.

@@ -345,6 +345,8 @@ Avoid exposing backend secrets through `NEXT_PUBLIC_*` environment variables.
 
 Comments should explain intent, constraints, or non-obvious decisions—not restate what the code already says.
 
+Document the codebase's important boundaries consistently. Add concise module, class, function, or inline comments to files that own core infrastructure or program flow—for example API entry points, database setup and models, external-service adapters, voice-agent/session handling, and frontend data-access or real-time update logic. Do not add boilerplate comments to every file, generated dependencies, virtual environments, or self-explanatory presentation-only components.
+
 Good comments explain:
 
 * Why a LiveKit event is normalized.
