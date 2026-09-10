@@ -1,0 +1,10 @@
+[project]
+name = "effigov-backend"
+version = "0.1.0"
+description = "Backend API for the Effigov take-home"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.115.0",
+    "sqlalchemy>=2.0.0",
+]
+

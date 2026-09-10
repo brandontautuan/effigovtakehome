@@ -1,0 +1,8 @@
+{
+  "name": "Brandon",
+  "phone": "5551234567",
+  "issue_type": "missed_pickup",
+  "description": "Trash was not collected",
+  "status": "open",
+  "notes": ""
+}
