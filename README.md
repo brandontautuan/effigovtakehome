@@ -1,4 +1,4 @@
-# Effigov Take-home: Backend Milestone
+# Effigov Take-home
 
 A small FastAPI backend for creating and managing resident service cases. It uses SQLite and SQLAlchemy to keep the implementation easy to inspect and run locally.
 
@@ -45,3 +45,61 @@ curl 'http://127.0.0.1:8000/cases/lookup?phone=5551234567'
 - `GET /cases/lookup?case_number=EG-1001` or `GET /cases/lookup?phone=5551234567` finds matching cases.
 
 Case numbers are derived from the database ID (`EG-1001` for ID 1), which is deterministic and sufficient for the local demo.
+
+## Voice agent
+
+The `agent/` directory contains the LiveKit voice agent for the missed-trash-pickup demo. It collects the resident's name, phone number, and a short description, then calls `POST /cases` on this backend. The agent never opens the SQLite database directly.
+
+### Configure LiveKit
+
+Create `agent/.env.local` from the example and add your LiveKit Cloud credentials. LiveKit Inference supplies the speech-to-text, language model, and text-to-speech models used by this small demo.
+
+```bash
+cd agent
+cp .env.example .env.local
+```
+
+Required values:
+
+```text
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+BACKEND_URL=http://127.0.0.1:8000
+```
+
+### Run the backend and voice agent
+
+In one terminal, start the API:
+
+```bash
+cd backend
+uv run fastapi dev app/main.py
+```
+
+In a second terminal, install and start the LiveKit agent:
+
+```bash
+cd agent
+uv sync
+uv run python agent.py console
+```
+
+`console` is the simplest LiveKit development workflow for speaking to the agent from the terminal. To make the agent available to a LiveKit room later, use:
+
+```bash
+uv run python agent.py dev
+```
+
+After reporting a missed pickup, confirm the case was stored with:
+
+```bash
+curl http://127.0.0.1:8000/cases
+```
+
+The agent exposes three LLM tools: `create_case` (required), plus `lookup_case` and `update_case`. Each calls the existing FastAPI endpoint over HTTP and returns the API response to the agent. If the backend call fails, the tool returns an error and the agent is instructed not to claim that a case was created.
+
+## Known limitations
+
+- This demo requires LiveKit Cloud credentials for LiveKit Inference; no provider keys are needed beyond those credentials.
+- The agent supports only the narrow missed-trash-pickup workflow. A dashboard and telephony/frontend connection are intentionally not part of this phase.

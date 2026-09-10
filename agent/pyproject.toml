@@ -1,0 +1,10 @@
+[project]
+name = "effigov-agent"
+version = "0.1.0"
+description = "LiveKit voice agent for the EffiGov missed pickup demo"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "httpx>=0.28.0",
+    "livekit-agents>=1.6.9",
+    "python-dotenv>=1.0.0",
+]
