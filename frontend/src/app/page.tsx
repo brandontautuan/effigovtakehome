@@ -6,9 +6,11 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Call,
   Case,
+  ServiceRequest,
   callWebSocketUrl,
   fetchCalls,
   fetchCases,
+  fetchServiceRequests,
   formatDate,
   statusClass,
 } from "@/lib/cases";
@@ -18,14 +20,20 @@ const REFRESH_INTERVAL_MS = 3_000;
 export default function DashboardPage() {
   const [cases, setCases] = useState<Case[]>([]);
   const [calls, setCalls] = useState<Call[]>([]);
+  const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadDashboard = useCallback(async () => {
     try {
-      const [loadedCases, loadedCalls] = await Promise.all([fetchCases(), fetchCalls()]);
+      const [loadedCases, loadedCalls, loadedServiceRequests] = await Promise.all([
+        fetchCases(),
+        fetchCalls(),
+        fetchServiceRequests(),
+      ]);
       setCases(loadedCases);
       setCalls(loadedCalls);
+      setServiceRequests(loadedServiceRequests);
       setError(null);
     } catch {
       setError("Unable to load cases. Check that the FastAPI server is running.");
@@ -100,6 +108,31 @@ export default function DashboardPage() {
                       <small>{call.status} · {call.case_number ?? "Case pending"}</small>
                     </div>
                   </Link>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="live-calls" aria-labelledby="service-requests-heading">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">City handoffs</p>
+                <h2 id="service-requests-heading">Other Service Requests</h2>
+              </div>
+              <span className="subtle">Resident-approved requests for another city team</span>
+            </div>
+            {serviceRequests.length === 0 ? (
+              <p className="empty-activity">No non-trash service requests yet.</p>
+            ) : (
+              <div className="call-grid">
+                {serviceRequests.slice(0, 6).map((request) => (
+                  <article className="call-card" key={request.id}>
+                    <span className="completed-dot" />
+                    <div>
+                      <strong>{request.destination}</strong>
+                      <p>{request.description}</p>
+                      <small>{request.status} · {formatDate(request.created_at)}</small>
+                    </div>
+                  </article>
                 ))}
               </div>
             )}

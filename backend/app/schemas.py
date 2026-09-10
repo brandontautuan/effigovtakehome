@@ -104,6 +104,25 @@ class TranscriptMessageRead(BaseModel):
     created_at: datetime
 
 
+class ServiceRequestCreate(BaseModel):
+    """A resident-approved request for the appropriate city team."""
+
+    call_id: int | None = None
+    description: str = Field(min_length=1)
+    destination: str = Field(default="appropriate city team", max_length=100)
+
+
+class ServiceRequestRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    call_id: int | None
+    description: str
+    destination: str
+    status: str
+    created_at: datetime
+
+
 class ServiceTime(BaseModel):
     day: str
     time: str

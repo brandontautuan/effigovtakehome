@@ -80,3 +80,24 @@ class TranscriptMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, server_default=func.now()
     )
+
+
+class ServiceRequest(Base):
+    """A lightweight handoff request for a non-trash city service question."""
+
+    __tablename__ = "service_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    call_id: Mapped[int | None] = mapped_column(
+        ForeignKey("calls.id"), nullable=True, index=True
+    )
+    description: Mapped[str] = mapped_column(Text)
+    destination: Mapped[str] = mapped_column(
+        String(100), default="appropriate city team", server_default="appropriate city team"
+    )
+    status: Mapped[str] = mapped_column(
+        String(50), default="pending", server_default="pending"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=func.now()
+    )

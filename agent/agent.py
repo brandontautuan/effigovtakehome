@@ -20,6 +20,7 @@ from livekit.agents import (
     cli,
     function_tool,
     inference,
+    llm,
 )
 
 from case_api import CaseApiClient, CaseApiError
@@ -45,10 +46,14 @@ class EffiGovAgent(Agent):
                 trash-service cases, and general trash or recycling questions.
 
                 If a request is outside trash or recycling services and is not an emergency,
-                explain briefly that it is outside this team's scope and ask whether the
-                resident would like to be routed to the appropriate city department. Do not
-                claim that a transfer happened: this demo cannot actually route calls. If they
-                want help after that, suggest contacting the city's main service line.
+                explain briefly that it is outside this team's scope. Offer to relay a short
+                request to the appropriate city team, for example: "I don't handle that
+                directly, but I can relay your request to the appropriate city team. Would
+                you like me to do that?" Do not make this offer in the initial greeting.
+                Only if the resident agrees, call create_service_request with a concise
+                description of what they need. Then say that you have recorded it for the
+                appropriate city team; do not claim a live transfer happened. If they decline,
+                suggest contacting the city's main service line instead.
 
                 If the resident describes an immediate emergency, danger, medical emergency,
                 fire, crime in progress, or urgent need for police, begin with a brief caring
@@ -85,8 +90,12 @@ class EffiGovAgent(Agent):
 
                 After completing a resident's request, ask whether they need anything else.
                 If they say no, no thanks, goodbye, or otherwise indicate they are finished,
-                use end_conversation. Do not use it until the resident clearly indicates the
-                conversation is over.
+                use end_conversation to complete the current call record. Do not use it until
+                the resident clearly indicates the current request is over. The voice session
+                remains available after that: if the resident speaks again, treat it as a new
+                request. Do not reuse the previous request's name, phone, city, description,
+                case, or other personal details unless the resident provides or confirms them
+                again.
 
                 If a resident asks about an existing case, use lookup_case. If they request
                 an update and you know the database case ID, use update_case.
@@ -210,6 +219,29 @@ class EffiGovAgent(Agent):
         }
 
     @function_tool
+    async def create_service_request(
+        self, context: RunContext, description: str
+    ) -> dict[str, str | bool]:
+        """Record a resident-approved non-trash request for the appropriate city team.
+
+        Use only after a non-emergency request is outside trash and recycling services
+        and the resident has agreed to have it relayed.
+
+        Args:
+            description: A short, factual summary of what the resident needs.
+        """
+        try:
+            request = await self.case_api.create_service_request(self.call_id, description)
+        except CaseApiError as error:
+            return {"success": False, "message": str(error)}
+
+        return {
+            "success": True,
+            "service_request_id": str(request["id"]),
+            "status": str(request["status"]),
+        }
+
+    @function_tool
     async def update_case(
         self,
         context: RunContext,
@@ -252,12 +284,16 @@ class EffiGovAgent(Agent):
 
     @function_tool
     async def end_conversation(self, context: RunContext) -> StopResponse:
-        """End the call after the resident says they do not need further help."""
-        farewell = "You're all set. Thanks for calling EffiGov City Services. Have a good day."
+        """Complete the current request while keeping the voice session available."""
+        farewell = (
+            "You're all set. Thanks for calling Sacramento County City and Trash Services. "
+            "Have a good day."
+        )
+        completed_call_id = self.call_id
 
-        if self.call_id is not None:
+        if completed_call_id is not None:
             try:
-                await self.case_api.add_transcript(self.call_id, "agent", farewell)
+                await self.case_api.add_transcript(completed_call_id, "agent", farewell)
             except CaseApiError:
                 logger.warning("Could not save the closing transcript message")
 
@@ -268,13 +304,18 @@ class EffiGovAgent(Agent):
         )
         await speech
 
-        if self.call_id is not None:
+        if completed_call_id is not None:
             try:
-                await self.case_api.update_call(self.call_id, {"status": "completed"})
+                await self.case_api.update_call(completed_call_id, {"status": "completed"})
             except CaseApiError:
-                logger.warning("Could not complete call %s", self.call_id)
+                logger.warning("Could not complete call %s", completed_call_id)
 
-        context.session.shutdown(drain=False)
+        # Do not shut down the LiveKit session. The next finalized resident
+        # utterance creates a separate active Call record in entrypoint.
+        self.call_id = None
+        # The LiveKit room stays connected, but its next request must not carry
+        # previous resident details into the LLM's context.
+        await self.update_chat_ctx(llm.ChatContext.empty())
         return StopResponse()
 
 
@@ -297,13 +338,32 @@ async def entrypoint(ctx: JobContext) -> None:
         tts=inference.TTS(model="inworld/inworld-tts-2", voice="Ashley"),
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
     )
-    await session.start(agent=EffiGovAgent(case_api, call_id), room=ctx.room)
+    agent = EffiGovAgent(case_api, call_id)
+    await session.start(agent=agent, room=ctx.room)
+
+    async def ensure_active_call() -> int | None:
+        """Create a fresh dashboard call after the previous request is completed."""
+        if agent.call_id is not None:
+            return agent.call_id
+
+        try:
+            agent.call_id = int((await case_api.create_call())["id"])
+        except CaseApiError:
+            logger.warning("Could not create a new call record for the next request")
+        return agent.call_id
 
     async def add_transcript(role: str, content: str) -> None:
-        if call_id is None or not content:
+        if not content:
+            return
+        # A new call starts only when a resident speaks. This prevents a late
+        # committed farewell event from creating an empty dashboard call.
+        active_call_id = (
+            await ensure_active_call() if role == "resident" else agent.call_id
+        )
+        if active_call_id is None:
             return
         try:
-            await case_api.add_transcript(call_id, role, content)
+            await case_api.add_transcript(active_call_id, role, content)
         except CaseApiError:
             logger.warning("Could not save %s transcript message", role)
 
@@ -323,12 +383,12 @@ async def entrypoint(ctx: JobContext) -> None:
     session.on("conversation_item_added", on_conversation_item)
 
     async def finish_call() -> None:
-        if call_id is None:
+        if agent.call_id is None:
             return
         try:
-            await case_api.update_call(call_id, {"status": "completed"})
+            await case_api.update_call(agent.call_id, {"status": "completed"})
         except CaseApiError:
-            logger.warning("Could not complete call %s", call_id)
+            logger.warning("Could not complete call %s", agent.call_id)
 
     ctx.add_shutdown_callback(finish_call)
     await ctx.connect()

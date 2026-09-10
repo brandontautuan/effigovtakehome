@@ -23,7 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import Call, Case, CaseEvent, TranscriptMessage
+from .models import Call, Case, CaseEvent, ServiceRequest, TranscriptMessage
 from .schemas import (
     CallCreate,
     CallRead,
@@ -35,6 +35,8 @@ from .schemas import (
     TranscriptMessageCreate,
     TranscriptMessageRead,
     ServiceScheduleRead,
+    ServiceRequestCreate,
+    ServiceRequestRead,
 )
 
 
@@ -219,6 +221,30 @@ def call_read(call: Call, db: Session) -> CallRead:
         case = db.get(Case, call.case_id)
         response.case_number = case.case_number if case else None
     return response
+
+
+@app.post(
+    "/service-requests", response_model=ServiceRequestRead, status_code=status.HTTP_201_CREATED
+)
+async def create_service_request(
+    payload: ServiceRequestCreate, db: DbSession
+) -> ServiceRequest:
+    if payload.call_id is not None:
+        get_call_or_404(payload.call_id, db)
+    request = ServiceRequest(**payload.model_dump())
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    await call_connections.broadcast("service_request_created", service_request_id=request.id)
+    return request
+
+
+@app.get("/service-requests", response_model=list[ServiceRequestRead])
+def list_service_requests(db: DbSession) -> list[ServiceRequest]:
+    statement = select(ServiceRequest).order_by(
+        ServiceRequest.created_at.desc(), ServiceRequest.id.desc()
+    )
+    return list(db.scalars(statement))
 
 
 @app.post("/calls", response_model=CallRead, status_code=status.HTTP_201_CREATED)

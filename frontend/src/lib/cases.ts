@@ -45,6 +45,15 @@ export type TranscriptMessage = {
   created_at: string;
 };
 
+export type ServiceRequest = {
+  id: number;
+  call_id: number | null;
+  description: string;
+  destination: string;
+  status: string;
+  created_at: string;
+};
+
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -77,6 +86,10 @@ export function fetchCaseEvents(id: string): Promise<CaseEvent[]> {
 
 export function fetchCalls(): Promise<Call[]> {
   return request<Call[]>("/calls", { cache: "no-store" });
+}
+
+export function fetchServiceRequests(): Promise<ServiceRequest[]> {
+  return request<ServiceRequest[]>("/service-requests", { cache: "no-store" });
 }
 
 export function fetchCall(id: string): Promise<Call> {

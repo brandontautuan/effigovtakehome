@@ -139,6 +139,8 @@ The case detail page requests `GET /cases/{id}/events` every three seconds along
 
 Starting a LiveKit session creates an active `Call` through `POST /calls`. The agent forwards finalized resident transcription from LiveKit's `user_input_transcribed` event and committed agent replies from `conversation_item_added` to `POST /calls/{id}/transcript`. When `create_case` succeeds, the agent links the call to its returned case ID and known name, phone, and issue type through `PATCH /calls/{id}`. The shutdown callback marks the call completed and preserves its transcript.
 
+When the resident clearly says they are finished, the agent records a farewell, marks that `Call` completed, and clears its conversational context without stopping the LiveKit session. The next finalized resident utterance creates a separate active `Call`, so a new “hello” starts a new request without reusing names, contact details, or prior case information. A service `Case` is still created only after a resident supplies the information needed to report a missed pickup.
+
 The staff dashboard loads calls and transcripts through the REST API, using SQLite as the source of truth. It also opens `ws://127.0.0.1:8000/ws/calls`; FastAPI broadcasts small notifications after call, transcript, and case changes, and the dashboard refetches after each notification. Existing three-second polling remains as a reconnect/failure fallback.
 
 ## Demo service schedules

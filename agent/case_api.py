@@ -56,6 +56,15 @@ class CaseApiClient:
     async def update_call(self, call_id: int, updates: dict[str, Any]) -> dict[str, Any]:
         return await self._request("PATCH", f"/calls/{call_id}", json=updates)
 
+    async def create_service_request(
+        self, call_id: int | None, description: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/service-requests",
+            json={"call_id": call_id, "description": description},
+        )
+
     async def lookup_case(
         self, case_number: str | None = None, phone: str | None = None
     ) -> list[dict[str, Any]]:
