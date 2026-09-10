@@ -1,4 +1,4 @@
-"""SQLAlchemy persistence models for cases, their audit history, and voice calls."""
+"""SQLAlchemy persistence models for cases, audit history, calls, and handoffs."""
 
 from datetime import datetime
 

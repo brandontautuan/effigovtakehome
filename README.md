@@ -1,6 +1,18 @@
-# Effigov Take-home
+# EffiGov Take-home
 
-A small FastAPI backend for creating and managing resident service cases. It uses SQLite and SQLAlchemy to keep the implementation easy to inspect and run locally.
+EffiGov is a local demo for city-service intake. Residents speak with a LiveKit voice agent to report missed trash pickups, ask about demo trash/recycling schedules, or approve a handoff request for another city team. Staff use a Next.js dashboard to monitor calls, service cases, transcripts, and handoffs. FastAPI and SQLite provide the application boundary and persistence layer.
+
+```text
+Resident
+  ↓
+LiveKit voice agent
+  ↓
+FastAPI call, transcript, and service-request API
+  ↓
+SQLite
+  ↓
+Next.js staff dashboard
+```
 
 ## Run locally
 
@@ -43,12 +55,27 @@ curl 'http://127.0.0.1:8000/cases/lookup?phone=5551234567'
 - `GET /cases/{case_id}` returns one case or a 404.
 - `PATCH /cases/{case_id}` partially updates `status`, `notes`, or `description`.
 - `GET /cases/lookup?case_number=EG-1001` or `GET /cases/lookup?phone=5551234567` finds matching cases.
+- `GET /service-info/schedule?city=folsom` returns demo trash and recycling schedule data.
+- `POST /service-requests` records a resident-approved handoff for another city team; `GET /service-requests` lists them.
+- `POST /calls`, `GET /calls`, `GET /calls/{call_id}`, and `PATCH /calls/{call_id}` manage voice-call state.
+- `POST` and `GET /calls/{call_id}/transcript` preserve finalized transcript messages.
+- `GET /ws/calls` sends dashboard refresh notifications after call, transcript, case, and handoff changes. It is not a source of record.
 
 Case numbers are derived from the database ID (`EG-1001` for ID 1), which is deterministic and sufficient for the local demo.
 
+## Automated checks
+
+No automated test suite is configured yet. The available static checks are:
+
+```bash
+cd backend && uv run python -m compileall -q app
+cd agent && uv run python -m compileall -q agent.py case_api.py
+cd frontend && npm run lint && npx tsc --noEmit
+```
+
 ## Voice agent
 
-The `agent/` directory contains the LiveKit voice agent for the missed-trash-pickup demo. It collects the resident's name, phone number, and a short description, then calls `POST /cases` on this backend. The agent never opens the SQLite database directly.
+The `agent/` directory contains the LiveKit voice agent. It handles missed-trash-pickup reports, demo schedule questions, existing cases, and resident-approved non-trash handoffs. It calls FastAPI over HTTP and never opens the SQLite database directly.
 
 ### Configure LiveKit
 
@@ -97,12 +124,14 @@ After reporting a missed pickup, confirm the case was stored with:
 curl http://127.0.0.1:8000/cases
 ```
 
-The agent exposes three LLM tools: `create_case` (required), plus `lookup_case` and `update_case`. Each calls the existing FastAPI endpoint over HTTP and returns the API response to the agent. If the backend call fails, the tool returns an error and the agent is instructed not to claim that a case was created.
+The agent uses six LLM tools: `create_case`, `lookup_case`, `update_case`, `lookup_service_schedule`, `create_service_request`, and `end_conversation`. Each application-data tool calls FastAPI over HTTP. If a backend call fails, the tool returns a safe error and the agent is instructed not to claim success.
 
 ## Known limitations
 
 - This demo requires LiveKit Cloud credentials for LiveKit Inference; no provider keys are needed beyond those credentials.
-- The agent supports only the narrow missed-trash-pickup workflow. Telephony is intentionally not part of this phase.
+- Schedule information is static demo data, not an authoritative municipal feed.
+- Non-trash requests are recorded as handoffs; this demo does not route or transfer calls to another team.
+- No authentication, production deployment, automated AI analysis, or telephony integration is included.
 
 ## Staff dashboard
 
@@ -127,7 +156,7 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:3000. The case list and detail view poll FastAPI every three seconds, so cases created or updated by the voice agent appear without a manual browser refresh.
+Open http://127.0.0.1:3000. The dashboard shows live calls, other-city handoffs, and cases. It polls FastAPI every three seconds and also refreshes after WebSocket notifications, so updates appear without a manual browser refresh.
 
 ## Case activity
 
@@ -137,7 +166,7 @@ The case detail page requests `GET /cases/{id}/events` every three seconds along
 
 ## Live calls and transcript
 
-Starting a LiveKit session creates an active `Call` through `POST /calls`. The agent forwards finalized resident transcription from LiveKit's `user_input_transcribed` event and committed agent replies from `conversation_item_added` to `POST /calls/{id}/transcript`. When `create_case` succeeds, the agent links the call to its returned case ID and known name, phone, and issue type through `PATCH /calls/{id}`. The shutdown callback marks the call completed and preserves its transcript.
+Starting a LiveKit session creates an active `Call` through `POST /calls`. The agent forwards finalized resident transcription from LiveKit's `user_input_transcribed` event and committed agent replies from `conversation_item_added` to `POST /calls/{id}/transcript`. When `create_case` succeeds, the agent links the call to its returned case ID and known name, phone, and issue type through `PATCH /calls/{id}`. The shutdown callback marks an active call completed and preserves its transcript.
 
 When the resident clearly says they are finished, the agent records a farewell, marks that `Call` completed, and clears its conversational context without stopping the LiveKit session. The next finalized resident utterance creates a separate active `Call`, so a new “hello” starts a new request without reusing names, contact details, or prior case information. A service `Case` is still created only after a resident supplies the information needed to report a missed pickup.
 
@@ -145,4 +174,4 @@ The staff dashboard loads calls and transcripts through the REST API, using SQLi
 
 ## Demo service schedules
 
-The voice agent can look up mock trash and recycling schedules through `GET /service-info/schedule?city=folsom`. The backend reads the data from `backend/app/data/service_schedules.json`; this is intentionally demo data, not real municipal service information. City matching ignores casing and extra spacing. Unsupported cities return a clear `404` response rather than a guessed schedule.
+The voice agent can look up mock trash and recycling schedules through `GET /service-info/schedule?city=folsom`. The backend reads the data from `backend/app/data/service_schedules.json`; this is intentionally demo data, not real municipal service information. Sacramento, Folsom, El Dorado, Rancho Cordova, and Elk Grove are supported. City matching ignores casing and extra spacing. Unsupported cities return a clear `404` response rather than a guessed schedule.

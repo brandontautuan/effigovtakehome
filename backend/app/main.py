@@ -1,4 +1,4 @@
-"""HTTP and WebSocket boundary for EffiGov cases, calls, and transcripts.
+"""HTTP and WebSocket boundary for EffiGov cases, calls, handoffs, and transcripts.
 
 Route handlers keep persistence and validation at the API edge.  The voice agent
 and staff dashboard use this module rather than accessing SQLite directly.
@@ -87,6 +87,8 @@ class CallConnectionManager:
 
 call_connections = CallConnectionManager()
 
+# Demo-only schedule data stays outside route handlers so it is easy to replace
+# with an authoritative municipal source later without changing the API contract.
 SCHEDULES_PATH = Path(__file__).parent / "data" / "service_schedules.json"
 SERVICE_SCHEDULES = json.loads(SCHEDULES_PATH.read_text())
 SUPPORTED_CITIES = ", ".join(schedule["city"] for schedule in SERVICE_SCHEDULES.values())
@@ -100,6 +102,7 @@ def get_case_or_404(case_id: int, db: Session) -> Case:
 
 
 def normalize_city(city: str) -> str:
+    """Normalize user-entered city names before looking up local demo data."""
     return " ".join(city.split()).casefold()
 
 
