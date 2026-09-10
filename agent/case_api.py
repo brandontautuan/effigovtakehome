@@ -31,6 +31,7 @@ class CaseApiClient:
                 "phone": phone,
                 "issue_type": issue_type,
                 "description": description,
+                "source": "voice_agent",
             },
         )
 
@@ -48,7 +49,11 @@ class CaseApiClient:
         return response
 
     async def update_case(self, case_id: int, updates: dict[str, str]) -> dict[str, Any]:
-        return await self._request("PATCH", f"/cases/{case_id}", json=updates)
+        return await self._request(
+            "PATCH",
+            f"/cases/{case_id}",
+            json={**updates, "source": "voice_agent"},
+        )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         try:

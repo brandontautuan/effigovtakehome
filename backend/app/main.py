@@ -7,8 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import Case
-from .schemas import CaseCreate, CaseRead, CaseUpdate
+from .models import Case, CaseEvent
+from .schemas import CaseCreate, CaseEventRead, CaseRead, CaseUpdate
 
 
 Base.metadata.create_all(bind=engine)
@@ -36,8 +36,20 @@ def get_case_or_404(case_id: int, db: Session) -> Case:
 @app.post("/cases", response_model=CaseRead, status_code=status.HTTP_201_CREATED)
 def create_case(payload: CaseCreate, db: DbSession) -> Case:
     last_id = db.scalar(select(func.max(Case.id))) or 0
-    case = Case(case_number=f"EG-{1001 + last_id}", **payload.model_dump())
+    case = Case(
+        case_number=f"EG-{1001 + last_id}",
+        **payload.model_dump(exclude={"source"}),
+    )
     db.add(case)
+    db.flush()
+    db.add(
+        CaseEvent(
+            case_id=case.id,
+            event_type="created",
+            description="Case created",
+            source=payload.source,
+        )
+    )
     db.commit()
     db.refresh(case)
     return case
@@ -70,11 +82,40 @@ def get_case(case_id: int, db: DbSession) -> Case:
     return get_case_or_404(case_id, db)
 
 
+@app.get("/cases/{case_id}/events", response_model=list[CaseEventRead])
+def list_case_events(case_id: int, db: DbSession) -> list[CaseEvent]:
+    get_case_or_404(case_id, db)
+    statement = select(CaseEvent).where(CaseEvent.case_id == case_id)
+    return list(db.scalars(statement.order_by(CaseEvent.created_at.desc(), CaseEvent.id.desc())))
+
+
 @app.patch("/cases/{case_id}", response_model=CaseRead)
 def update_case(case_id: int, payload: CaseUpdate, db: DbSession) -> Case:
     case = get_case_or_404(case_id, db)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True, exclude={"source"})
+    for field, value in updates.items():
+        old_value = getattr(case, field)
+        if old_value == value:
+            continue
         setattr(case, field, value)
+        db.add(
+            CaseEvent(
+                case_id=case.id,
+                event_type=f"{field}_updated",
+                description=event_description(field, old_value, value),
+                source=payload.source,
+                old_value=old_value,
+                new_value=value,
+            )
+        )
     db.commit()
     db.refresh(case)
     return case
+
+
+def event_description(field: str, old_value: str, new_value: str) -> str:
+    if field == "status":
+        return f"Status changed: {old_value} → {new_value}"
+    if field == "notes":
+        return "Notes updated"
+    return "Description updated"

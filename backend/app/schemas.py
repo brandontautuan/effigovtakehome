@@ -8,12 +8,14 @@ class CaseCreate(BaseModel):
     phone: str = Field(min_length=1, max_length=50)
     issue_type: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1)
+    source: str = Field(default="api", max_length=50)
 
 
 class CaseUpdate(BaseModel):
     status: str | None = Field(default=None, min_length=1, max_length=50)
     notes: str | None = None
     description: str | None = Field(default=None, min_length=1)
+    source: str = Field(default="api", max_length=50)
 
 
 class CaseRead(BaseModel):
@@ -30,3 +32,15 @@ class CaseRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
+class CaseEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    case_id: int
+    event_type: str
+    description: str
+    source: str
+    old_value: str | None
+    new_value: str | None
+    created_at: datetime

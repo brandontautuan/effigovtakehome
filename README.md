@@ -85,7 +85,7 @@ uv sync
 uv run python agent.py console
 ```
 
-`console` is the simplest LiveKit development workflow for speaking to the agent from the terminal. To make the agent available to a LiveKit room later, use:
+`console` starts an interactive local voice session. Current LiveKit releases mark this source-command form as deprecated in favor of the LiveKit CLI equivalent, `lk agent console`. It remains a working option when the CLI is not installed. To make the agent available to a LiveKit room later, use:
 
 ```bash
 uv run python agent.py dev
@@ -102,4 +102,35 @@ The agent exposes three LLM tools: `create_case` (required), plus `lookup_case` 
 ## Known limitations
 
 - This demo requires LiveKit Cloud credentials for LiveKit Inference; no provider keys are needed beyond those credentials.
-- The agent supports only the narrow missed-trash-pickup workflow. A dashboard and telephony/frontend connection are intentionally not part of this phase.
+- The agent supports only the narrow missed-trash-pickup workflow. Telephony is intentionally not part of this phase.
+
+## Staff dashboard
+
+The `frontend/` Next.js app is a lightweight staff view over the FastAPI case API. It reads cases through `GET /cases` and `GET /cases/{id}`, and the status selector sends `PATCH /cases/{id}`. It does not access SQLite directly.
+
+Create `frontend/.env.local` from the example if the API is not running on its default local URL:
+
+```bash
+cd frontend
+cp .env.example .env.local
+```
+
+```text
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+Start the dashboard while the backend is running:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://127.0.0.1:3000. The case list and detail view poll FastAPI every three seconds, so cases created or updated by the voice agent appear without a manual browser refresh.
+
+## Case activity
+
+Each new case receives a `CaseEvent` in SQLite. Later changes to status, notes, or description receive one event per field that actually changed. Events record a concise description, timestamp, source (`voice_agent`, `staff_dashboard`, or `api`), and old/new values when applicable.
+
+The case detail page requests `GET /cases/{id}/events` every three seconds alongside the case itself. The voice agent sends `voice_agent` as source metadata and the dashboard sends `staff_dashboard` when it changes a status.
