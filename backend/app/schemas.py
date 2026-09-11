@@ -123,6 +123,46 @@ class ServiceRequestRead(BaseModel):
     created_at: datetime
 
 
+class CallTopicCreate(BaseModel):
+    """A non-emergency topic detected while a resident is speaking."""
+
+    category: str = Field(min_length=1, max_length=50)
+    topic: str = Field(min_length=1, max_length=100)
+    summary: str = Field(default="", max_length=2_000)
+    outcome: str = Field(default="in_progress", min_length=1, max_length=50)
+    case_id: int | None = None
+    service_request_id: int | None = None
+    classification_source: str = Field(default="agent", max_length=50)
+
+
+class CallTopicUpdate(BaseModel):
+    """Staff corrections preserve the original topic through source metadata."""
+
+    category: str | None = Field(default=None, min_length=1, max_length=50)
+    topic: str | None = Field(default=None, min_length=1, max_length=100)
+    summary: str | None = Field(default=None, max_length=2_000)
+    outcome: str | None = Field(default=None, min_length=1, max_length=50)
+    case_id: int | None = None
+    service_request_id: int | None = None
+
+
+class CallTopicRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    call_id: int
+    category: str
+    topic: str
+    summary: str
+    outcome: str
+    case_id: int | None
+    service_request_id: int | None
+    classification_source: str
+    staff_override: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class ServiceTime(BaseModel):
     day: str
     time: str

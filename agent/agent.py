@@ -6,6 +6,7 @@ SDK-specific objects out of the backend and dashboard layers.
 
 import asyncio
 import logging
+import re
 import textwrap
 
 from dotenv import load_dotenv
@@ -30,6 +31,21 @@ from case_api import CaseApiClient, CaseApiError
 load_dotenv(".env.local")
 load_dotenv(".env")
 logger = logging.getLogger(__name__)
+
+
+# This conservative local check is a persistence gate, not a substitute for
+# emergency dispatch. It runs before transcript data is sent to FastAPI.
+EMERGENCY_PATTERN = re.compile(
+    r"\b(911|emergency|fire|smoke|gun|shooting|shot|stab(?:bed|bing)?|"
+    r"heart attack|not breathing|unconscious|overdose|fell down|car crash|"
+    r"accident|crime in progress)\b",
+    re.IGNORECASE,
+)
+
+
+def is_emergency_transcript(content: str) -> bool:
+    """Keep potential emergency conversations out of the application database."""
+    return bool(EMERGENCY_PATTERN.search(content))
 
 
 class EffiGovAgent(Agent):
@@ -107,6 +123,36 @@ class EffiGovAgent(Agent):
         )
         self.case_api = case_api
         self.call_id = call_id
+        self.persistence_suppressed = False
+        self.discard_agent_transcript_until_resident = False
+
+    async def record_topic(
+        self,
+        category: str,
+        topic: str,
+        summary: str,
+        outcome: str,
+        case_id: int | None = None,
+        service_request_id: int | None = None,
+    ) -> None:
+        """Attach a normal-call topic to its concrete outcome when available."""
+        if self.call_id is None or self.persistence_suppressed:
+            return
+        try:
+            await self.case_api.create_call_topic(
+                self.call_id,
+                {
+                    "category": category,
+                    "topic": topic,
+                    "summary": summary,
+                    "outcome": outcome,
+                    "case_id": case_id,
+                    "service_request_id": service_request_id,
+                    "classification_source": "agent",
+                },
+            )
+        except CaseApiError:
+            logger.warning("Could not record %s topic for call %s", topic, self.call_id)
 
     @function_tool
     async def create_case(
@@ -125,6 +171,8 @@ class EffiGovAgent(Agent):
             issue_type: Use "missed_pickup" for the supported workflow.
             description: Short description of the missed pickup.
         """
+        if self.persistence_suppressed:
+            return {"success": False, "message": "Emergency guidance is active."}
         try:
             case = await self.case_api.create_case(name, phone, issue_type, description)
         except CaseApiError as error:
@@ -143,6 +191,14 @@ class EffiGovAgent(Agent):
                 )
             except CaseApiError:
                 logger.warning("Case %s was created but could not be linked to call", case["id"])
+
+        await self.record_topic(
+            "sanitation",
+            issue_type,
+            description,
+            "case_created",
+            case_id=int(case["id"]),
+        )
 
         return {
             "success": True,
@@ -164,6 +220,8 @@ class EffiGovAgent(Agent):
             case_number: Human-readable case number, such as EG-1001.
             phone: Resident's phone number when a case number is unavailable.
         """
+        if self.persistence_suppressed:
+            return {"success": False, "message": "Emergency guidance is active."}
         if not case_number and not phone:
             return {"success": False, "message": "A case number or phone number is required."}
 
@@ -176,6 +234,13 @@ class EffiGovAgent(Agent):
             return {"success": False, "message": "No matching case was found."}
 
         case = cases[0]
+        await self.record_topic(
+            "case_management",
+            "case_lookup",
+            f"Looked up case {case['case_number']}.",
+            "info_provided",
+            case_id=int(case["id"]),
+        )
         return {
             "success": True,
             "case_id": str(case["id"]),
@@ -195,6 +260,8 @@ class EffiGovAgent(Agent):
         Args:
             city: The resident's city, such as Folsom or Elk Grove.
         """
+        if self.persistence_suppressed:
+            return {"success": False, "message": "Emergency guidance is active."}
         try:
             schedule = await self.case_api.lookup_service_schedule(city)
         except CaseApiError as error:
@@ -210,6 +277,12 @@ class EffiGovAgent(Agent):
 
         trash = schedule["trash"]
         recycling = schedule["recycling"]
+        await self.record_topic(
+            "schedule_information",
+            "pickup_schedule",
+            f"Requested demo pickup schedule for {schedule['city']}.",
+            "info_provided",
+        )
         return {
             "success": True,
             "city": str(schedule["city"]),
@@ -230,10 +303,20 @@ class EffiGovAgent(Agent):
         Args:
             description: A short, factual summary of what the resident needs.
         """
+        if self.persistence_suppressed:
+            return {"success": False, "message": "Emergency guidance is active."}
         try:
             request = await self.case_api.create_service_request(self.call_id, description)
         except CaseApiError as error:
             return {"success": False, "message": str(error)}
+
+        await self.record_topic(
+            "city_handoff",
+            "other_city_service",
+            description,
+            "handoff_created",
+            service_request_id=int(request["id"]),
+        )
 
         return {
             "success": True,
@@ -258,6 +341,8 @@ class EffiGovAgent(Agent):
             status: New case status, if requested.
             description: Replacement description, if requested.
         """
+        if self.persistence_suppressed:
+            return {"success": False, "message": "Emergency guidance is active."}
         updates = {
             field: value
             for field, value in {
@@ -274,6 +359,14 @@ class EffiGovAgent(Agent):
             case = await self.case_api.update_case(case_id, updates)
         except CaseApiError as error:
             return {"success": False, "message": str(error)}
+
+        await self.record_topic(
+            "case_management",
+            "case_update",
+            f"Updated case {case['case_number']}.",
+            "case_updated",
+            case_id=int(case["id"]),
+        )
 
         return {
             "success": True,
@@ -313,6 +406,9 @@ class EffiGovAgent(Agent):
         # Do not shut down the LiveKit session. The next finalized resident
         # utterance creates a separate active Call record in entrypoint.
         self.call_id = None
+        # The closing utterance was explicitly persisted above. Ignore its later
+        # committed LiveKit event so it cannot be buffered into the next call.
+        self.discard_agent_transcript_until_resident = True
         # The LiveKit room stays connected, but its next request must not carry
         # previous resident details into the LLM's context.
         await self.update_chat_ctx(llm.ChatContext.empty())
@@ -327,39 +423,50 @@ async def entrypoint(ctx: JobContext) -> None:
     """Run one LiveKit room session and preserve its available call evidence."""
     ctx.log_context_fields = {"room": ctx.room.name}
     case_api = CaseApiClient()
-    call_id: int | None = None
-    try:
-        call_id = int((await case_api.create_call())["id"])
-    except CaseApiError:
-        logger.warning("Could not create a call record; continuing without live dashboard updates")
-
     session = AgentSession(
         stt=inference.STT(model="deepgram/flux-general", language="en"),
         tts=inference.TTS(model="inworld/inworld-tts-2", voice="Ashley"),
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
     )
-    agent = EffiGovAgent(case_api, call_id)
+    agent = EffiGovAgent(case_api, call_id=None)
     await session.start(agent=agent, room=ctx.room)
 
+    pending_transcript: list[tuple[str, str]] = []
+
     async def ensure_active_call() -> int | None:
-        """Create a fresh dashboard call after the previous request is completed."""
+        """Persist a call only after its first resident utterance is non-emergency."""
+        if agent.persistence_suppressed:
+            return None
         if agent.call_id is not None:
             return agent.call_id
-
         try:
             agent.call_id = int((await case_api.create_call())["id"])
+            for buffered_role, buffered_content in pending_transcript:
+                await case_api.add_transcript(agent.call_id, buffered_role, buffered_content)
+            pending_transcript.clear()
         except CaseApiError:
-            logger.warning("Could not create a new call record for the next request")
+            logger.warning("Could not create a call record for a non-emergency request")
         return agent.call_id
 
     async def add_transcript(role: str, content: str) -> None:
         if not content:
             return
+        if role == "resident" and is_emergency_transcript(content):
+            # No call, transcript, classification, or handoff is retained for
+            # an emergency request. The agent prompt directs the resident to 911.
+            pending_transcript.clear()
+            agent.persistence_suppressed = True
+            return
+        if agent.persistence_suppressed:
+            return
         # A new call starts only when a resident speaks. This prevents a late
         # committed farewell event from creating an empty dashboard call.
-        active_call_id = (
-            await ensure_active_call() if role == "resident" else agent.call_id
-        )
+        if role == "agent" and agent.call_id is None:
+            if agent.discard_agent_transcript_until_resident:
+                return
+            pending_transcript.append((role, content))
+            return
+        active_call_id = await ensure_active_call() if role == "resident" else agent.call_id
         if active_call_id is None:
             return
         try:
@@ -371,6 +478,13 @@ async def entrypoint(ctx: JobContext) -> None:
         # LiveKit invokes event callbacks synchronously; queue persistence so it
         # cannot delay speech processing or block subsequent agent turns.
         if event.is_final:
+            # Set this before scheduling any work so an LLM tool cannot race
+            # ahead and persist the emergency utterance or a related record.
+            if is_emergency_transcript(event.transcript):
+                pending_transcript.clear()
+                agent.persistence_suppressed = True
+                return
+            agent.discard_agent_transcript_until_resident = False
             asyncio.create_task(add_transcript("resident", event.transcript))
 
     def on_conversation_item(event) -> None:

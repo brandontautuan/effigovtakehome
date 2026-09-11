@@ -23,11 +23,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import Call, Case, CaseEvent, ServiceRequest, TranscriptMessage
+from .models import Call, CallTopic, Case, CaseEvent, ServiceRequest, TranscriptMessage
 from .schemas import (
     CallCreate,
     CallRead,
     CallUpdate,
+    CallTopicCreate,
+    CallTopicRead,
+    CallTopicUpdate,
     CaseCreate,
     CaseEventRead,
     CaseRead,
@@ -217,6 +220,13 @@ def get_call_or_404(call_id: int, db: Session) -> Call:
     return call
 
 
+def get_call_topic_or_404(topic_id: int, db: Session) -> CallTopic:
+    topic = db.get(CallTopic, topic_id)
+    if topic is None:
+        raise HTTPException(status_code=404, detail="Call topic not found")
+    return topic
+
+
 def call_read(call: Call, db: Session) -> CallRead:
     """Add the human-readable case number without exposing an ORM relationship."""
     response = CallRead.model_validate(call)
@@ -294,6 +304,59 @@ async def add_transcript_message(
     db.refresh(message)
     await call_connections.broadcast("transcript_added", call_id=call_id)
     return message
+
+
+@app.get("/calls/{call_id}/topics", response_model=list[CallTopicRead])
+def list_call_topics(call_id: int, db: DbSession) -> list[CallTopic]:
+    get_call_or_404(call_id, db)
+    statement = select(CallTopic).where(CallTopic.call_id == call_id)
+    return list(db.scalars(statement.order_by(CallTopic.created_at, CallTopic.id)))
+
+
+@app.post(
+    "/calls/{call_id}/topics", response_model=CallTopicRead, status_code=status.HTTP_201_CREATED
+)
+async def create_call_topic(
+    call_id: int, payload: CallTopicCreate, db: DbSession
+) -> CallTopic:
+    get_call_or_404(call_id, db)
+    if payload.case_id is not None:
+        get_case_or_404(payload.case_id, db)
+    if (
+        payload.service_request_id is not None
+        and db.get(ServiceRequest, payload.service_request_id) is None
+    ):
+        raise HTTPException(status_code=404, detail="Service request not found")
+    topic = CallTopic(call_id=call_id, **payload.model_dump())
+    db.add(topic)
+    db.commit()
+    db.refresh(topic)
+    await call_connections.broadcast("call_topic_created", call_id=call_id, topic_id=topic.id)
+    return topic
+
+
+@app.patch("/call-topics/{topic_id}", response_model=CallTopicRead)
+async def update_call_topic(
+    topic_id: int, payload: CallTopicUpdate, db: DbSession
+) -> CallTopic:
+    topic = get_call_topic_or_404(topic_id, db)
+    updates = payload.model_dump(exclude_unset=True)
+    if "case_id" in updates and updates["case_id"] is not None:
+        get_case_or_404(updates["case_id"], db)
+    if (
+        "service_request_id" in updates
+        and updates["service_request_id"] is not None
+        and db.get(ServiceRequest, updates["service_request_id"]) is None
+    ):
+        raise HTTPException(status_code=404, detail="Service request not found")
+    for field, value in updates.items():
+        setattr(topic, field, value)
+    topic.staff_override = True
+    topic.classification_source = "staff"
+    db.commit()
+    db.refresh(topic)
+    await call_connections.broadcast("call_topic_updated", call_id=topic.call_id, topic_id=topic.id)
+    return topic
 
 
 @app.patch("/calls/{call_id}", response_model=CallRead)

@@ -101,3 +101,42 @@ class ServiceRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, server_default=func.now()
     )
+
+
+class CallTopic(Base):
+    """One actionable or informational topic identified within a normal call.
+
+    A call can contain multiple independent requests, so its case and handoff
+    links live here rather than directly on ``Call``. Emergency conversations
+    intentionally never reach this model or any other persistence model.
+    """
+
+    __tablename__ = "call_topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("calls.id"), index=True)
+    category: Mapped[str] = mapped_column(String(50))
+    topic: Mapped[str] = mapped_column(String(100))
+    summary: Mapped[str] = mapped_column(Text, default="", server_default="")
+    outcome: Mapped[str] = mapped_column(
+        String(50), default="in_progress", server_default="in_progress"
+    )
+    case_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cases.id"), nullable=True, index=True
+    )
+    service_request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("service_requests.id"), nullable=True, index=True
+    )
+    classification_source: Mapped[str] = mapped_column(
+        String(50), default="agent", server_default="agent"
+    )
+    staff_override: Mapped[bool] = mapped_column(default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        server_default=func.now(),
+    )

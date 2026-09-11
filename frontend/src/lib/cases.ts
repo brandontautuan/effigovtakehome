@@ -45,6 +45,21 @@ export type TranscriptMessage = {
   created_at: string;
 };
 
+export type CallTopic = {
+  id: number;
+  call_id: number;
+  category: string;
+  topic: string;
+  summary: string;
+  outcome: string;
+  case_id: number | null;
+  service_request_id: number | null;
+  classification_source: string;
+  staff_override: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ServiceRequest = {
   id: number;
   call_id: number | null;
@@ -98,6 +113,20 @@ export function fetchCall(id: string): Promise<Call> {
 
 export function fetchTranscript(id: string): Promise<TranscriptMessage[]> {
   return request<TranscriptMessage[]>(`/calls/${id}/transcript`, { cache: "no-store" });
+}
+
+export function fetchCallTopics(id: string): Promise<CallTopic[]> {
+  return request<CallTopic[]>(`/calls/${id}/topics`, { cache: "no-store" });
+}
+
+export function updateCallTopic(
+  id: number,
+  updates: Pick<CallTopic, "category" | "topic" | "summary" | "outcome">
+): Promise<CallTopic> {
+  return request<CallTopic>(`/call-topics/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
 }
 
 export function callWebSocketUrl(): string {

@@ -6,13 +6,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Call,
+  CallTopic,
   Case,
   callWebSocketUrl,
   fetchCall,
   fetchCase,
   fetchTranscript,
+  fetchCallTopics,
   formatDate,
   TranscriptMessage,
+  updateCallTopic,
 } from "@/lib/cases";
 
 const REFRESH_INTERVAL_MS = 3_000;
@@ -22,18 +25,21 @@ export default function CallDetailPage() {
   const [call, setCall] = useState<Call | null>(null);
   const [caseItem, setCaseItem] = useState<Case | null>(null);
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const [topics, setTopics] = useState<CallTopic[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
   const loadCall = useCallback(async () => {
     try {
-      const [loadedCall, loadedMessages] = await Promise.all([
+      const [loadedCall, loadedMessages, loadedTopics] = await Promise.all([
         fetchCall(params.id),
         fetchTranscript(params.id),
+        fetchCallTopics(params.id),
       ]);
       setCall(loadedCall);
       setMessages(loadedMessages);
+      setTopics(loadedTopics);
       setCaseItem(loadedCall.case_id ? await fetchCase(String(loadedCall.case_id)) : null);
       setError(null);
     } catch {
@@ -78,6 +84,16 @@ export default function CallDetailPage() {
     // Keep an active call readable as finalized messages arrive.
     transcriptEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  async function saveTopic(topic: CallTopic, updates: Pick<CallTopic, "category" | "topic" | "summary" | "outcome">) {
+    try {
+      const updatedTopic = await updateCallTopic(topic.id, updates);
+      setTopics((currentTopics) => currentTopics.map((item) => item.id === updatedTopic.id ? updatedTopic : item));
+      setError(null);
+    } catch {
+      setError("Unable to update this topic. Please try again.");
+    }
+  }
 
   if (isLoading) return <main className="page-shell"><p className="state-message">Loading call…</p></main>;
   if (error || !call) {
@@ -125,10 +141,49 @@ export default function CallDetailPage() {
           </dl>
         </aside>
       </div>
+
+      <section className="activity-card" aria-labelledby="topics-heading">
+        <div className="activity-heading">
+          <div><p className="eyebrow">Classification</p><h2 id="topics-heading">Call topics</h2></div>
+          <span className="subtle">Staff can correct agent classifications</span>
+        </div>
+        {topics.length === 0 ? <p className="empty-activity">No classified topics yet.</p> : (
+          <div className="topic-list">
+            {topics.map((topic) => <TopicEditor key={topic.id} topic={topic} onSave={saveTopic} />)}
+          </div>
+        )}
+      </section>
     </main>
   );
 }
 
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="detail-row"><dt>{label}</dt><dd>{value}</dd></div>;
+}
+
+function TopicEditor({ topic, onSave }: { topic: CallTopic; onSave: (topic: CallTopic, updates: Pick<CallTopic, "category" | "topic" | "summary" | "outcome">) => Promise<void> }) {
+  const [category, setCategory] = useState(topic.category);
+  const [topicName, setTopicName] = useState(topic.topic);
+  const [summary, setSummary] = useState(topic.summary);
+  const [outcome, setOutcome] = useState(topic.outcome);
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handleSave() {
+    setIsSaving(true);
+    await onSave(topic, { category, topic: topicName, summary, outcome });
+    setIsSaving(false);
+  }
+
+  return <article className="topic-card">
+    <div className="topic-controls">
+      <label>Category<input value={category} onChange={(event) => setCategory(event.target.value)} /></label>
+      <label>Topic<input value={topicName} onChange={(event) => setTopicName(event.target.value)} /></label>
+      <label>Outcome<input value={outcome} onChange={(event) => setOutcome(event.target.value)} /></label>
+    </div>
+    <label className="topic-summary">Summary<textarea value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
+    <div className="topic-footer">
+      <span>{topic.case_id ? <Link className="case-link" href={`/cases/${topic.case_id}`}>Case #{topic.case_id}</Link> : null}{topic.service_request_id ? ` Handoff #${topic.service_request_id}` : null}{!topic.case_id && !topic.service_request_id ? "No linked record" : null}</span>
+      <button type="button" disabled={isSaving} onClick={() => void handleSave()}>{isSaving ? "Saving…" : "Save correction"}</button>
+    </div>
+  </article>;
 }

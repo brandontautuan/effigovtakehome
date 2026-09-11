@@ -7,7 +7,7 @@ Resident
   ↓
 LiveKit voice agent
   ↓
-FastAPI call, transcript, and service-request API
+FastAPI call, transcript, topic, and service-request API
   ↓
 SQLite
   ↓
@@ -59,6 +59,7 @@ curl 'http://127.0.0.1:8000/cases/lookup?phone=5551234567'
 - `POST /service-requests` records a resident-approved handoff for another city team; `GET /service-requests` lists them.
 - `POST /calls`, `GET /calls`, `GET /calls/{call_id}`, and `PATCH /calls/{call_id}` manage voice-call state.
 - `POST` and `GET /calls/{call_id}/transcript` preserve finalized transcript messages.
+- `GET` and `POST /calls/{call_id}/topics` list or add classified topics for a call; `PATCH /call-topics/{topic_id}` lets staff correct a topic.
 - `GET /ws/calls` sends dashboard refresh notifications after call, transcript, case, and handoff changes. It is not a source of record.
 
 Case numbers are derived from the database ID (`EG-1001` for ID 1), which is deterministic and sufficient for the local demo.
@@ -171,6 +172,14 @@ Starting a LiveKit session creates an active `Call` through `POST /calls`. The a
 When the resident clearly says they are finished, the agent records a farewell, marks that `Call` completed, and clears its conversational context without stopping the LiveKit session. The next finalized resident utterance creates a separate active `Call`, so a new “hello” starts a new request without reusing names, contact details, or prior case information. A service `Case` is still created only after a resident supplies the information needed to report a missed pickup.
 
 The staff dashboard loads calls and transcripts through the REST API, using SQLite as the source of truth. It also opens `ws://127.0.0.1:8000/ws/calls`; FastAPI broadcasts small notifications after call, transcript, and case changes, and the dashboard refetches after each notification. Existing three-second polling remains as a reconnect/failure fallback.
+
+## Call topics and emergency privacy
+
+A normal call can contain more than one request. The agent records each handled request as a `CallTopic`, which stores a category, topic, factual summary, outcome, and optional link to the Case or ServiceRequest it created or updated. This lets one call create multiple cases or handoffs without relying on the legacy single `calls.case_id` link. The call detail page shows these mappings and lets staff correct a category, topic, summary, or outcome; staff corrections are marked with `classification_source=staff` and `staff_override=true`.
+
+Topics are currently recorded live when the agent successfully handles a missed pickup, schedule question, case lookup/update, or city handoff. There is not yet a post-call AI classifier; incomplete or unclear calls remain visible for staff review rather than being guessed at automatically.
+
+Emergency conversations are intentionally not persisted. Before creating a Call or forwarding transcript evidence, the agent checks finalized resident speech for conservative emergency signals. It immediately suppresses persistence and relies on its emergency instruction to direct the resident to call 911. If a normal case was already created before a later emergency statement, that prior case remains; the emergency statement and any subsequent interaction are not stored.
 
 ## Demo service schedules
 
